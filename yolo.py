@@ -156,16 +156,12 @@ with dai.Device(pipeline) as device:
                 detection = detections[0]
                 print(labelMap[detection.label])
 
-        # ------
         inDisparity = q.get()
         depth_frame = inDisparity.getFrame()
         depth_frame = (depth_frame * (255 / depth.initialConfig.getMaxDisparity())).astype(np.uint8)
-        # cv2.imshow("disparity", depth_frame)
         displayFrame("disparity", depth_frame)
         coloured_depth_frame = cv2.applyColorMap(depth_frame, cv2.COLORMAP_JET)
-        displayFrame("color map", coloured_depth_frame)
-
-        # ------
+        # displayFrame("color map", coloured_depth_frame)
 
         if frame is not None:
             displayFrame("rgb", frame)
