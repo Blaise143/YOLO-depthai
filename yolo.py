@@ -5,21 +5,22 @@ import depthai as dai
 import numpy as np
 
 import time
+
 nnPath = "model/yolo-v3-tiny-tf_openvino_2021.4_6shave.blob"
 # tiny yolo v4 label texts
 labelMap = [
-    "person",         "bicycle",    "car",           "motorbike",     "aeroplane",   "bus",           "train",
-    "truck",          "boat",       "traffic light", "fire hydrant",  "stop sign",   "parking meter", "bench",
-    "bird",           "cat",        "dog",           "horse",         "sheep",       "cow",           "elephant",
-    "bear",           "zebra",      "giraffe",       "backpack",      "umbrella",    "handbag",       "tie",
-    "suitcase",       "frisbee",    "skis",          "snowboard",     "sports ball", "kite",          "baseball bat",
-    "baseball glove", "skateboard", "surfboard",     "tennis racket", "bottle",      "wine glass",    "cup",
-    "fork",           "knife",      "spoon",         "bowl",          "banana",      "apple",         "sandwich",
-    "orange",         "broccoli",   "carrot",        "hot dog",       "pizza",       "donut",         "cake",
-    "chair",          "sofa",       "pottedplant",   "bed",           "diningtable", "toilet",        "tvmonitor",
-    "laptop",         "mouse",      "remote",        "keyboard",      "cell phone",  "microwave",     "oven",
-    "toaster",        "sink",       "refrigerator",  "book",          "clock",       "vase",          "scissors",
-    "teddy bear",     "hair drier", "toothbrush"
+    "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
+    "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie",
+    "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+    "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+    "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
+    "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
+    "chair", "sofa", "pottedplant", "bed", "diningtable", "toilet", "tvmonitor",
+    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
+    "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+    "teddy bear", "hair drier", "toothbrush"
 ]
 
 syncNN = True
@@ -35,6 +36,38 @@ nnOut = pipeline.create(dai.node.XLinkOut)
 
 xoutRgb.setStreamName("rgb")
 nnOut.setStreamName("nn")
+
+# Depth map Stuff
+extended_disparity = False
+subpixel = True
+
+lr_check = True
+monoLeft = pipeline.create(dai.node.MonoCamera)
+monoRight = pipeline.create(dai.node.MonoCamera)
+depth = pipeline.create(dai.node.StereoDepth)
+xout = pipeline.create(dai.node.XLinkOut)
+xout.setStreamName("disparity")
+
+# Deoth map properties
+monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+monoLeft.setBoardSocket(dai.CameraBoardSocket.LEFT)
+monoRight.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+monoRight.setBoardSocket(dai.CameraBoardSocket.RIGHT)
+
+# Node to produce depth map
+depth.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+depth.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_7x7)
+depth.setLeftRightCheck(lr_check)
+depth.setExtendedDisparity(extended_disparity)
+depth.setSubpixel(subpixel)
+
+# Linking
+monoLeft.out.link(depth.left)
+monoRight.out.link(depth.right)
+depth.disparity.link(xout.input)
+
+# ______________________
+
 
 # Properties
 camRgb.setPreviewSize(416, 416)
@@ -65,10 +98,11 @@ detectionNetwork.out.link(nnOut.input)
 
 # Connect to device and start pipeline
 with dai.Device(pipeline) as device:
-
     # Output queues will be used to get the rgb frames and nn data from the outputs defined above
     qRgb = device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
     qDet = device.getOutputQueue(name="nn", maxSize=4, blocking=False)
+
+    q = device.getOutputQueue(name="disparity", maxSize=4, blocking=False)  # Check out for this
 
     frame = None
     detections = []
@@ -76,22 +110,27 @@ with dai.Device(pipeline) as device:
     counter = 0
     color2 = (255, 255, 255)
 
+
     # nn data, being the bounding box locations, are in <0..1> range - they need to be normalized with frame width/height
     def frameNorm(frame, bbox):
         normVals = np.full(len(bbox), frame.shape[0])
         normVals[::2] = frame.shape[1]
         return (np.clip(np.array(bbox), 0, 1) * normVals).astype(int)
 
+
     def displayFrame(name, frame):
         color = (255, 0, 0)
         for detection in detections:
             bbox = frameNorm(frame, (detection.xmin, detection.ymin, detection.xmax, detection.ymax))
 
-            cv2.putText(frame, labelMap[detection.label], (bbox[0] + 10, bbox[1] + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-            cv2.putText(frame, f"{int(detection.confidence * 100)}%", (bbox[0] + 10, bbox[1] + 40), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+            cv2.putText(frame, labelMap[detection.label], (bbox[0] + 10, bbox[1] + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5,
+                        255)
+            cv2.putText(frame, f"{int(detection.confidence * 100)}%", (bbox[0] + 10, bbox[1] + 40),
+                        cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
             cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
         # Show the frame
         cv2.imshow(name, frame)
+
 
     while True:
         if syncNN:
@@ -116,6 +155,17 @@ with dai.Device(pipeline) as device:
             if len(detections) > 0:
                 detection = detections[0]
                 print(labelMap[detection.label])
+
+        # ------
+        inDisparity = q.get()
+        depth_frame = inDisparity.getFrame()
+        depth_frame = (depth_frame * (255 / depth.initialConfig.getMaxDisparity())).astype(np.uint8)
+        # cv2.imshow("disparity", depth_frame)
+        displayFrame("disparity", depth_frame)
+        coloured_depth_frame = cv2.applyColorMap(depth_frame, cv2.COLORMAP_JET)
+        displayFrame("color map", coloured_depth_frame)
+
+        # ------
 
         if frame is not None:
             displayFrame("rgb", frame)
